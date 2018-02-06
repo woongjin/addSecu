@@ -85,13 +85,16 @@ function change_pathinfo($files, $target_dir){
 function add_secu_request_getParameter($file){
 	// ÆÄÀÏÀ» ¹è¿­ ÇüÅÂ·Î ÀĞ¾î µéÀÎ´Ù.
 	$file = @file($file);
+
 	$result = new stdClass();
-	
+
+	$is_declared_secu = false;
+
 	// ½ÃÅ¥¾î ÄÚµùÀÌ ÇÊ¿äÇÑÁö ÀúÀåÇÏ±â À§ÇÑ ÇÃ·¡±× °ª
 	$is_need_declare_secu = false;
 	
 	// mpackage.share.SecureValidator ¶Ç´Â mpackage.share.* °¡ ¼±¾ğµÇ¾î ÀÖÁö¸¦ ÀúÀåÇÏ±â À§ÇÑ ÇÃ·¡±× °ª
-	$is_declare_import_secu = false;
+	$is_declared_import_secu = false;
 
 	// Ã¹¹øÂ°ÀÇ <%°¡ ¸î¹øÂ° ¶óÀÎ¿¡ ÀÖ´ÂÁö ÀúÀåÇÏ±â À§ÇÑ º¯¼ö
 	$first_declare_jsp = -1;
@@ -101,6 +104,8 @@ function add_secu_request_getParameter($file){
 
 	// °Ë»öÇÑ º¯¼ö¸¦ Àá½Ã ÀúÀåÇÏ±â À§ÇÑ º¯¼ö
 	$saved_variable_name = "";
+
+	$count = count($file);
 
 	// ÇÑ ¶óÀÎ¾¿ °Ë»öÇÏ±â À§ÇÑ foreach¹®
 	foreach($file as $kk => $vv){
@@ -132,7 +137,12 @@ function add_secu_request_getParameter($file){
 
 		// mpackage.share.SecureValidator ¶Ç´Â mpackage.share.* ¸¦ °Ë»ö
 		if(preg_match(DECLARE_IMPORT_PATTERN, $vv)){
-			$is_declare_import_secu = true;
+			$is_declared_import_secu = true;
+		}
+
+		// mpackage.share.SecureValidator ¶Ç´Â mpackage.share.* ¸¦ °Ë»ö
+		if(strpos($vv, DECLARE_SECURE_VALIDATOR)){
+			$is_declared_secu = true;
 		}
 
 		// °¡Àå ³ªÁß¿¡ ¼±¾ğ ÇÑ <%@¸¦ °Ë»ö
@@ -143,78 +153,76 @@ function add_secu_request_getParameter($file){
 		// º¯¼ö ¸í°ú request.getParameter, getRequestURI, getQueryString¸¦ °Ë»ö
 		if (preg_match('/([°¡-ÆRa-zA-Z0-9\_]+)\s*\=\s*.*request\.(getParameter\(\s*\"(.*)\"\s*\)|getRequestURI\(\s*\)|getQueryString\(\s*\))/', $vv, $matches)) {
 
-			// secu.makeSecureChar(..) °¡ ÀÌ¹Ì Àû¿ëµÇ¾î ÀÖ´Ù¸é continueÇÔ
-			if(preg_match('/'. SECURE_VALIDATOR_USE_FUNCTION .'/', $vv)) continue;
-
 			// °Ë»öµÈ º¯¼ö ¸í
 			$variable_name = $matches[1];
 
-			// comment(//)ÀÏ °æ¿ì continueÇÔ
-			if(preg_match('/^\s*\/\/.*?' . $variable_name . '/', $file[$kk])) continue;
+			for ($j=$kk+1; $j<$count; $j++) {
+				
+				if(strpos($file[$j], SECURE_VALIDATOR_USE_FUNCTION . '(' . $variable_name . ')')) continue;
 
-			// request.getParameter(..)==null?... ÇüÅÂ => secu.makeSecureChar(request.getParameter(..)==null?...); º¯°æ
-			$r1 = preg_replace('/(request\.getParameter\(\s*\".*\"\s*\))(\s*[!=]=\s*null\s*\?\s*)(\1\s*:\s*.+|.+\s*:\s*\1)(.*;)/', REPLACEMENT, $vv);
+				if(preg_match('/(\/\/)*\s*System\.out\.print(ln)\(.*' . $variable_name . '.*\)\s*;/', $file[$j])) {
+					$file[$j] = preg_replace('/(\/\/)*\s*System\.out\.print(ln)\(.*' . $variable_name . '.*\)\s*;/', '', $file[$j]);
+					continue;
+				}
 
-			// request.getParameter(..)==null?... °æ¿ì°¡ ¾Æ´Ô
-			if($file[$kk] == $r1) {
+				if(preg_match('/\<\%\s*=\s*' . $variable_name . '\s*\%\>/', $file[$j])) {
+					$file[$j] = preg_replace('/(\<\%\s*=\s*)(' . $variable_name . ')(\s*\%\>)/', '$1' . SECURE_VALIDATOR_USE_FUNCTION . '($2)$3', $file[$j]);
+				}
+				if(preg_match('/out.print\s*[^;]*' . $variable_name . '[)+;\s]+/', $file[$j])) {
 
-				// <%=request.getParameter(..)%> => <%=secu.makeSecureChar(request.getParameter(..))%> º¯°æ
-				$r2 = preg_replace('/(<%=)(request\.getParameter\(\s*\".*\"\s*\))(\s*%>)/', '$1' . SECURE_VALIDATOR_USE_FUNCTION . '($2)$3', $vv);
-
-				// <%=request.getParameter(..)%> °æ¿ì°¡ ¾Æ´Ô
-				if($file[$kk] == $r2) {				
-
-					// ;(¼¼¹ÌÄİ·Ğ)ÀÌ ¾øÀ» °æ¿ì
-					if(!preg_match('/;/', $file[$kk])){
-						// º¯¼ö¸¦ Àá½Ã ÀúÀå
-						$saved_variable_name = $variable_name;
+					// ÁÖ¼®(//)ÀÎ °æ¿ì »èÁ¦
+					if(preg_match('/(\/\/)\s*out\.print(ln)*\s*\(.*' . $variable_name . '.*\)\s*;/', $file[$j])) {
+						$file[$j] = preg_replace('/(\/\/)\s*out\.print(ln)*\s*\(.*' . $variable_name . '.*\)\s*;/', '', $file[$j]);
 						continue;
 					}
 
-					// ´ÙÀ½¶óÀÎÀÇ ÁÙÀ» ¸ÂÃß¾î ÁÖ±â À§ÇÑ¿© °ø¹éÀ» °¡Á®¿È
-					preg_match('/^\s*/', $file[$kk], $space_matches);
+					// out.print(${variable_name}) ÇüÅÂ
+					if(strpos($file[$j], '"')){
 
-					// {º¯¼ö¸í} = request.getParameter(..);ÀÇ ´ÙÀ½ ¶óÀÎ¿¡
-					// {º¯¼ö¸í} = secu.makeSecureChar({º¯¼ö¸í}); À» Ãß°¡
-					$file[$kk] = $file[$kk] . $space_matches[0] . $variable_name . " = " . SECURE_VALIDATOR_USE_FUNCTION . "(" . $variable_name . ");" . EOL;
-				} else {
-					// $r2¸¦ Àû¿ë
-					$file[$kk] = $r2;
+						if(preg_match('/\"\s*\+\s*' . $variable_name .'/', $file[$j])) {
+							$file[$j] = preg_replace('/(\"\s*\+\s*)(' . $variable_name .')/', '$1' . SECURE_VALIDATOR_USE_FUNCTION . '($2)', $file[$j]);
+						} else {
+							$file[$j] = preg_replace('/(\(\s*)(' . $variable_name .')(\s*\+)/', '$1' . SECURE_VALIDATOR_USE_FUNCTION . '($2)$3', $file[$j]);
+						}
+					} else {
+						$file[$j] = preg_replace('/(out.print(?:ln)*\(\s*[^"]*)(' . $variable_name .')([^"]*\s*\))/', '$1' . SECURE_VALIDATOR_USE_FUNCTION . '($2)$3', $file[$j]);
+					}
+
+					// out.print(ln)À» <%= %>·Î º¯È¯
+					$file[$j] = preg_replace('/(?:out\.print(?:ln)*\s*\()(.+)([\+|\);])/', '%><%=$1%><%', $file[$j]);
 				}
-			} else {
-				// $r1¸¦ Àû¿ë
-				$file[$kk] = $r1;
 			}
 
 			// ½ÃÅ¥¾î ÄÚµùÀÌ ÇÊ¿äÇÑ ÆÄÀÏÀÓÀ» ³ªÅ¸³»±â À§ÇÏ¿© ÇÃ·¡±× °ª true·Î º¯°æ
 			$is_need_declare_secu = true;
 		}
-		//WIN to UNIX (\r\n -> \n)
-		$file[$kk] = preg_replace("/\r\n/", "\n", $file[$kk]);
 	}
 
 	// SECURE_VALIDATOR¸¦ ÀÓÆ÷Æ® ÇÔ
-	if($is_need_declare_secu && !$is_declare_import_secu){
+	if($is_need_declare_secu && !$is_declared_import_secu){
 		$file[0] = IMPORT_SECURE_VALIDATOR . EOL . $file[0];
 	}
 
 	// ½ÃÅ¥¾î ÄÚµùÀÌ ÇÊ¿äÇÑ ÆÄÀÏ
 	if($is_need_declare_secu){
 
-		// Ã¹¹øÂ° <% °¡ ÀÖ´Â ¶óÀÎ
-		if($first_declare_jsp != -1) {
-			$pos = strrpos($file[$first_declare_jsp], "<%") + 2;
-			$front_str = substr($file[$first_declare_jsp], 0, $pos);
-			$rear_str = substr($file[$first_declare_jsp], $pos);
+		// DECLARE_SECURE_VALIDATOR °¡ ¼±¾ğµÇ¾î ÀÖÁö ¾ÊÀ¸¸é Ãß°¡
+		if(!$is_declared_secu){
+			// Ã¹¹øÂ° <% °¡ ÀÖ´Â ¶óÀÎ
+			if($first_declare_jsp != -1) {
+				$pos = strrpos($file[$first_declare_jsp], "<%") + 2;
+				$front_str = substr($file[$first_declare_jsp], 0, $pos);
+				$rear_str = substr($file[$first_declare_jsp], $pos);
 
-			// Ã¹¹øÂ° <% °¡ ÀÖ´Â ¶óÀÎÀÇ ´ÙÀ½ ÁÙ¿¡ SECURE_VALIDATOR¸¦ ¼±¾ğ ÇÔ.
-			$file[$first_declare_jsp] = $front_str . EOL . "\t" . DECLARE_SECURE_VALIDATOR . EOL;
-			if(strlen(trim($rear_str)) > 1){
-				$file[$first_declare_jsp] .= $rear_str;
+				// Ã¹¹øÂ° <% °¡ ÀÖ´Â ¶óÀÎÀÇ ´ÙÀ½ ÁÙ¿¡ SECURE_VALIDATOR¸¦ ¼±¾ğ ÇÔ.
+				$file[$first_declare_jsp] = $front_str . EOL . "\t" . DECLARE_SECURE_VALIDATOR . EOL;
+				if(strlen(trim($rear_str)) > 1){
+					$file[$first_declare_jsp] .= $rear_str;
+				}
+			// ½ÃÅ¥¾î ÄÚµùÀÌ ÇÊ¿äÇÑ ÆÄÀÏÀÌÁö¸¸ <%°¡ ¾ø´Â °æ¿ì
+			} else {
+				$file[$last_declare_jspAt] = $file[$last_declare_jspAt] . "<% " . DECLARE_SECURE_VALIDATOR . " %>" . EOL;
 			}
-		// ½ÃÅ¥¾î ÄÚµùÀÌ ÇÊ¿äÇÑ ÆÄÀÏÀÌÁö¸¸ <%°¡ ¾ø´Â °æ¿ì
-		} else {
-			$file[$last_declare_jspAt] = $file[$last_declare_jspAt] . "<% " . DECLARE_SECURE_VALIDATOR . " %>" . EOL;
 		}
 		// ½ÃÅ¥¾î ÄÚµùÀÌ Àû¿ëµÈ ¼Ò½ºÄÚµå¸¦ ÀúÀå
 		$result->files = $file;
@@ -275,6 +283,17 @@ $target_dir = str_replace("\\", "/", $target_dir);
 // ´ë»ó ÆÄÀÏÀ» ¹è¿­°ªÀ¸·Î °¡Á®¿È
 $target_files = dir_recursive($target_dir);
 
+// ÆÄ¶ó¹ÌÅÍ °ªÀÌ Æú´õ°¡ ¾Æ´Ï°í ÆÄÀÏÀÏ °æ¿ìÀÇ Ã³¸®
+if(!$target_files){
+	// ÆÄÀÏ °æ·Î¸¦ ¹è¿­¿¡ °ªÀ» ³ÖÀ½
+	$target_files[] = $target_dir;
+
+	// ÆÄÀÏ¸íÀ» Á¦¿ÜÇÑ °ª¸¸ ÃßÃâÇØ¼­ $target_dir¿¡ ³ÖÀ½
+	$explode_slash_target_dir = explode("/", $target_dir);
+	$target_file = array_pop($explode_slash_target_dir);
+	$target_dir = implode("/", $explode_slash_target_dir);
+}
+
 // ´ë»ó ÆÄÀÏÀ» »ç¿ëÇÏ±â ½±°Ô pathinfo°ªÀ» ³Ö¾î¼­ °¡Á®¿È
 $pathinfo_files = change_pathinfo($target_files, $target_dir);
 
@@ -289,7 +308,7 @@ $count = count($pathinfo_files);
 foreach($pathinfo_files as $k => $v){
 	// ´ë»ó ÆÄÀÏÀÇ Ç® °æ·Î
 	$base = $v["base"];
-	
+
 	// ¸¸µé¾î¾ß ÇÒ Æú´õ¸¦ Á¤º¸¸¦ °¡Á®¿Í ¾øÀ¸¸é »ı¼º ÇÔ
 	$create_folder = $v["create_folder"];
 	create_folder($create_folder);
