@@ -259,6 +259,18 @@ function add_secu_request_getParameter($file, $varNames){
         if(strpos($file[$kk], SECURE_VALIDATOR_USE_FUNCTION)){
             // out.print(ln)을 <%= %>로 변환
             $file[$kk] = preg_replace('/(?:out\.print(?:ln)*\s*\()(.+)([\+|\)])(\s*;)/', '%><%=$1%><%', $file[$kk]);
+			$file[$kk] = preg_replace('/\)\s*;\s*out\s*\.\s*(print|println)\s*\(/', '%><%', $file[$kk]);
+
+			// out.print(${variable_name} +
+			// "somthing" ); 형태 대응
+			if(preg_match('/out\s*\.\s*(print|println)\s*\((.+)([^;]$)/', $file[$kk])) {
+				$file[$kk] = preg_replace('/out\s*\.\s*(print|println)\s*\((.+)([^;]$)/', '%><%$2$3', $file[$kk]);
+				$kkk = $kk;
+				while(preg_match('/\)\s*;/', $file[++$kkk])){
+					$file[$kkk] = preg_replace('/\)\s*;/', '%><%', $file[$kkk]);
+					break;
+				}
+			}
         }
 
         // <%=request.getParameter("${variable_name}")%> 형태
@@ -266,9 +278,32 @@ function add_secu_request_getParameter($file, $varNames){
             // 시큐어 코딩이 필요한 파일임을 나타내기 위하여 플래그 값 true로 변경
             $is_need_declare_secu = true;
             // <%=SECURE_VALIDATOR_USE_FUNCTION(request.getParameter("${variable_name}"))%> 형태로 변경
-            $file[$kk] = preg_replace('/(request\.)(getParameter\(\s*\"(.*)\"\s*\)|getRequestURI\(\s*\"(.*)\"\s*\)|getQueryString\(\s*\"(.*)\"\s*\))/', SECURE_VALIDATOR_USE_FUNCTION . '($1$2)', $file[$kk]);
+            $file[$kk] = preg_replace('/(request\.)(getParameter\(\s*\"(.*)\"\s*\)|getRequestURI\(\s*\)|getQueryString\(\s*\))/', SECURE_VALIDATOR_USE_FUNCTION . '($1$2)', $file[$kk]);
         }
+		// out.println(request.getParameter("${variable_name}")) 형태
+		if(preg_match('/(out\.(println|print)\s*\()(.*)(request\.getParameter\(\s*\"(\w*)\"\s*\))/', $file[$kk])) {
+			if(!strpos($file[$kk], SECURE_VALIDATOR_USE_FUNCTION)){	
+				$is_need_declare_secu = true;
+				$file[$kk] = preg_replace('/(out\.(?:println|print)\s*\()(.*)(request\.getParameter\(\s*\"(\w*)\"\s*\))/', '$1$2' . SECURE_VALIDATOR_USE_FUNCTION . '($3)', $file[$kk]);
+				// 주석일 경우 건너뜀
+				if(!preg_match('/^\s*\/\//', $file[$kk])) {
+					$file[$kk] = preg_replace('/(?:out\.print(?:ln)*\s*\()(.+)([\+|\)])(\s*;)/', '%><%=$1%><%', $file[$kk]);
+					$file[$kk] = preg_replace('/\)\s*;\s*out\s*\.\s*(print|println)\s*\(/', '%><%', $file[$kk]);
+				}
+			}
+		}
     }
+
+	foreach($file as $kk => $vv){
+		// <%$
+		// ^%> 삭제
+		if(preg_match('/(<%)(\s*$)/', $file[$kk]) && preg_match('/^\s*%>/', $file[$kk+1]) ) {
+			//<% 삭제
+			$file[$kk] = preg_replace('/(<%)(\s*$)/', '$2', $file[$kk]);
+			//%>
+			$file[$kk+1] = preg_replace('/(^\s*)(%>)/', '$1', $file[$kk+1]);
+		}
+	}
 
     // SECURE_VALIDATOR를 임포트 함
     if($is_need_declare_secu && !$is_declared_import_secu){
